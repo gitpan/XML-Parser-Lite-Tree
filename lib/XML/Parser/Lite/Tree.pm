@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use XML::Parser::LiteCopy;
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 use vars qw( $parser );
 
@@ -25,9 +25,10 @@ sub new {
 		Handlers => {
 			Start	=> sub { $self->_start_tag(@_); },
 			Char	=> sub { $self->_do_char(@_); },
+			CData	=> sub { $self->_do_cdata(@_); },
 			End	=> sub { $self->_end_tag(@_); },
 			Comment	=> sub { $self->_do_comment(@_); },
-			XMLDecl	=> sub { $self->_do_xmldecl(@_); },
+			PI	=> sub { $self->_do_pi(@_); },
 			Doctype	=> sub { $self->_do_doctype(@_); },
 		};
 	$self->{process_ns} = $self->{opts}->{process_ns} || 0;
@@ -99,6 +100,22 @@ sub _do_char {
 	1;
 }
 
+sub _do_cdata {
+	my $self = shift;
+	shift;
+
+	for my $content(@_){
+
+		my $new_tag = {
+			'type' => 'cdata',
+			'content' => $content,
+		};
+
+		push @{$self->{tag_stack}->[-1]->{children}}, $new_tag;
+	}
+	1;
+}
+
 sub _end_tag {
 	my $self = shift;
 
@@ -122,7 +139,7 @@ sub _do_comment {
 	1;
 }
 
-sub _do_xmldecl {
+sub _do_pi {
 	my $self = shift;
 	shift;
 
@@ -271,12 +288,9 @@ sub cleanup {
 
 	if ($obj->{type} eq 'pi'){
 
-		if ($obj->{content} =~ m/^(\S+)\s+(.*)\?$/s){
-
-			delete $obj->{content};
-			$obj->{target} = $1;
-			$obj->{content} = $2;
-		}
+		my ($x, $y) = split /\s+/, $obj->{content}, 2;
+		$obj->{target} = $x;
+		$obj->{content} = $y;
 	}
 
 
@@ -286,12 +300,9 @@ sub cleanup {
 
 	if ($obj->{type} eq 'dtd'){
 
-		if ($obj->{content} =~ m/^(\S+)\s+(.*)$/s){
-
-			delete $obj->{content};
-			$obj->{name} = $1;
-			$obj->{content} = $2;
-		}
+		my ($x, $y) = split /\s+/, $obj->{content}, 2;
+		$obj->{name} = $x;
+		$obj->{content} = $y;
 	}
 
 

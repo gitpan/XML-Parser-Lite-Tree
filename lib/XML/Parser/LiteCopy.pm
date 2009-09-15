@@ -1,25 +1,22 @@
-# NOTE: This module comes from SOAP::Lite, which you probably don't
-# have, so it's repackaged here to avoid the huge dependancy tree.
-# also, the current version in CPAN doesn't run under older perls
-# so i've removed the 'use version' magic. And it's been renamed
-# so that search.cpan.org doesn't whine at me
+# NOTE: This module originally came from SOAP::Lite, which you probably
+# don't have. It was first repackaged here just to avoid the huge 
+# dependancy tree, but this version has several features (CDATA
+# support, better PI and Comment support) that have been added.
 
-# ======================================================================
 #
 # Copyright (C) 2000-2007 Paul Kulchenko (paulclinger@yahoo.com)
 # Copyright (C) 2008 Martin Kutter (martin.kutter@fen-net.de)
+# Copyright (C) 2009 Cal Henderson (cal@iamcal.com)
+#
 # SOAP::Lite is free software; you can redistribute it
 # and/or modify it under the same terms as Perl itself.
 #
-# $Id: Lite.pm 249 2008-05-05 20:35:05Z kutterma $
-#
-# ======================================================================
 
 package XML::Parser::LiteCopy;
 
 use strict;
 use vars qw($VERSION);
-$VERSION = '0.710.05';
+$VERSION = '0.720.00';
 
 sub new {
     my $class = shift;
@@ -41,7 +38,7 @@ sub setHandlers {
     no strict 'refs'; local $^W;
     # clear all handlers if called without parameters
     if (not @_) {
-        for (qw(Start End Char Final Init Comment Doctype XMLDecl)) {
+        for (qw(Start End Char Final Init CData Comment Doctype PI)) {
             *$_ = sub {}
         }
     }
@@ -69,42 +66,47 @@ sub _regexp {
     # this copyright and citation notice remains intact and that modifications
     # or additions are clearly identified.
 
-    # Modifications may be tracked on SOAP::Lite's SVN at
-    # https://soaplite.svn.sourceforge.net/svnroot/soaplite/
-    #
     use re 'eval';
     my $TextSE = "[^<]+";
-    my $UntilHyphen = "[^-]*-";
-    my $Until2Hyphens = "([^-]*)-(?:[^-]$[^-]*-)*-";
-    my $CommentCE = "$Until2Hyphens(?{${package}::comment(\$2)})>?";
-#    my $Until2Hyphens = "$UntilHyphen(?:[^-]$UntilHyphen)*-";
-#    my $CommentCE = "$Until2Hyphens>?";
+
+    # the following backrefs have been added:
+    # 1 : TextSE
+    # 2 : MarkupSPE / DeclCE / CommentCE
+    # 3 : MarkupSPE / DeclCE / CDATA_CE
+    # 4 : MarkupSPE / DeclCE / DocTypeCE
+    # 5 : MarkupSPE / PI_CE
+    # 6 : MarkupSPE / EndTagCE
+    # 7+: MarkupSPE / ElemTagCE
+
+    my $Until2Hyphens = "(?:[^-]*)-(?:[^-]+-)*-";
+    my $CommentCE = "($Until2Hyphens)(?{${package}::comment(\$2)})>?";
+
     my $UntilRSBs = "[^\\]]*](?:[^\\]]+])*]+";
-    my $CDATA_CE = "$UntilRSBs(?:[^\\]>]$UntilRSBs)*>";
+    my $CDATA_CE = "($UntilRSBs(?:[^\\]>]$UntilRSBs)*)(?{${package}::cdata(\$3)})>";
+
     my $S = "[ \\n\\t\\r]+";
     my $NameStrt = "[A-Za-z_:]|[^\\x00-\\x7F]";
     my $NameChar = "[A-Za-z0-9_:.-]|[^\\x00-\\x7F]";
     my $Name = "(?:$NameStrt)(?:$NameChar)*";
     my $QuoteSE = "\"[^\"]*\"|'[^']*'";
     my $DT_IdentSE = "$Name(?:$S(?:$Name|$QuoteSE))*";
-#    my $DT_IdentSE = "$S$Name(?:$S(?:$Name|$QuoteSE))*";
     my $MarkupDeclCE = "(?:[^\\]\"'><]+|$QuoteSE)*>";
     my $S1 = "[\\n\\r\\t ]";
-    my $UntilQMs = "[^?]*\\?";
-    my $PI_Tail = "\\?>|$S1$UntilQMs(?:[^>?]$UntilQMs)*";
+    my $UntilQMs = "[^?]*\\?+";
+
+    my $PI_Tail = "\\?|$S1$UntilQMs(?:[^>?]$UntilQMs)*";
     my $DT_ItemSE = "<(?:!(?:--$Until2Hyphens>|[^-]$MarkupDeclCE)|\\?$Name(?:$PI_Tail>))|%$Name;|$S";
-    my $DocTypeCE = "$S($DT_IdentSE(?:$S)?(?:\\[(?:$DT_ItemSE)*](?:$S)?)?)>(?{${package}::_doctype(\$3)})";
-#    my $PI_Tail = "\\?>|$S1$UntilQMs(?:[^>?]$UntilQMs)*>";
-#    my $DT_ItemSE = "<(?:!(?:--$Until2Hyphens>|[^-]$MarkupDeclCE)|\\?$Name(?:$PI_Tail))|%$Name;|$S";
-#    my $DocTypeCE = "$DT_IdentSE(?:$S)?(?:\\[(?:$DT_ItemSE)*](?:$S)?)?>?";
+    my $DocTypeCE = "$S($DT_IdentSE(?:$S)?(?:\\[(?:$DT_ItemSE)*](?:$S)?)?)>(?{${package}::_doctype(\$4)})";
+
     my $DeclCE = "--(?:$CommentCE)?|\\[CDATA\\[(?:$CDATA_CE)?|DOCTYPE(?:$DocTypeCE)?";
-#    my $PI_CE = "$Name(?:$PI_Tail)?";
-    my $PI_CE = "($Name(?:$PI_Tail))>(?{${package}::_xmldecl(\$5)})";
+
+    my $PI_CE = "($Name(?:$PI_Tail))>(?{${package}::_pi(\$5)})";
+
     # these expressions were modified for backtracking and events
-#    my $EndTagCE = "($Name)(?{${package}::_end(\$2)})(?:$S)?>";
+
     my $EndTagCE = "($Name)(?{${package}::_end(\$6)})(?:$S)?>";
     my $AttValSE = "\"([^<\"]*)\"|'([^<']*)'";
-#    my $ElemTagCE = "($Name)(?:$S($Name)(?:$S)?=(?:$S)?(?:$AttValSE)(?{[\@{\$^R||[]},\$4=>defined\$5?\$5:\$6]}))*(?:$S)?(/)?>(?{${package}::_start( \$3,\@{\$^R||[]})})(?{\${7} and ${package}::_end(\$3)})";
+
     my $ElemTagCE = "($Name)"
         . "(?:$S($Name)(?:$S)?=(?:$S)?(?:$AttValSE)"
         . "(?{[\@{\$^R||[]},\$8=>defined\$9?\$9:\$10]}))*(?:$S)?(/)?>"
@@ -193,23 +195,26 @@ sub _end {
 }
 
 sub comment {
-    Comment(__PACKAGE__, $_[0]);
+    Comment(__PACKAGE__, substr $_[0], 0, -2);
 }
 
 sub end {
      pop(@stack) eq $_[0] or die "mismatched tag '$_[0]'\n";
      End(__PACKAGE__, $_[0]);
- }
+}
+
+sub cdata {
+    die "CDATA outside of tag stack" unless @stack;
+    CData(__PACKAGE__, substr $_[0], 0, -2);
+}
 
 sub _doctype {
     Doctype(__PACKAGE__, $_[0]);
 }
 
-sub _xmldecl {
-    XMLDecl(__PACKAGE__, $_[0]);
+sub _pi {
+    PI(__PACKAGE__, substr $_[0], 0, -1);
 }
-
-
 
 # ======================================================================
 1;
@@ -218,13 +223,13 @@ __END__
 
 =head1 NAME
 
-XML::Parser::Lite - Lightweight regexp-based XML parser
+XML::Parser::LiteCopy - Lightweight regexp-based XML parser
 
 =head1 SYNOPSIS
 
-  use XML::Parser::Lite;
+  use XML::Parser::LiteCopy;
 
-  $p1 = new XML::Parser::Lite;
+  $p1 = new XML::Parser::LiteCopy;
   $p1->setHandlers(
     Start => sub { shift; print "start: @_\n" },
     Char => sub { shift; print "char: @_\n" },
@@ -232,7 +237,7 @@ XML::Parser::Lite - Lightweight regexp-based XML parser
   );
   $p1->parse('<foo id="me">Hello World!</foo>');
 
-  $p2 = new XML::Parser::Lite
+  $p2 = new XML::Parser::LiteCopy
     Handlers => {
       Start => sub { shift; print "start: @_\n" },
       Char => sub { shift; print "char: @_\n" },
@@ -290,6 +295,10 @@ The following handlers can be set:
  Char
  End
  Final
+ CData
+ Doctype
+ Comment
+ PI
 
 All other handlers are ignored.
 
@@ -325,9 +334,9 @@ Called at the end of each XML node. See L<XML::Parser> for details
 
 See L<XML::Parser> for details
 
-=head2 XMLDecl
+=head2 PI
 
-See L<XML::Parser> for details
+See XMLDecl in L<XML::Parser> for details, but also includes other processing instructions
 
 =head2 Doctype
 
@@ -346,7 +355,9 @@ cleanup here.
 
 Copyright (C) 2000-2007 Paul Kulchenko. All rights reserved.
 
-Copyright (C) 2008- Martin Kutter. All rights reserved.
+Copyright (C) 2008 Martin Kutter. All rights reserved.
+
+Copyright (C) 2009 Cal Henderson. All rights reserved.
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
@@ -361,6 +372,8 @@ Paul Kulchenko (paulclinger@yahoo.com)
 Martin Kutter (martin.kutter@fen-net.de)
 
 Additional handlers supplied by Adam Leggett.
+
+Further modifications by Cal Henderson.
 
 =cut
 
